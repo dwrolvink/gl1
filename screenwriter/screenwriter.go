@@ -10,7 +10,12 @@ import (
 	"fmt"
 )
 
-
+var (
+	Vbo1 uint32
+	Vbo2 uint32
+	FragmentShader1 uint32
+	FragmentShader2 uint32
+)
 const (
 	Window_width  = cfg.Window_width
 	Window_height = cfg.Window_height
@@ -31,7 +36,26 @@ const (
 		gl_FragColor = vec4(1, 0.5, 1, 1.0);
 		}
 	` + "\x00"
+
+	fragmentShaderSourceRed = `
+		#version 120
+		void main() {
+		gl_FragColor = vec4(1, 0, 0, 1.0);
+		}
+	` + "\x00"
+
+	fragmentShaderSourceGreen = `
+		#version 120
+		void main() {
+		gl_FragColor = vec4(1, 0, 0, 1.0);
+		}
+	` + "\x00"	
 )
+
+func InitVBO(){
+	gl.GenBuffers(1, &Vbo1) //red
+	gl.GenBuffers(1, &Vbo2) //green
+}
 
 func RenderSquarePoints(Width, Height float32) []float32 {
 	// pixel definition
@@ -42,40 +66,34 @@ func RenderSquarePoints(Width, Height float32) []float32 {
 	sqW := sqWidth * xTransl
 	sqH := sqHeight * yTransl
 
-	x_origin :=  float32(0)
+	// init
+	x_origin := float32(0)
 	y_origin := float32(0)
+	origin := []float32{x_origin, y_origin, 0}; 
 
-	sqPoints := make([]float32,18)
-	// topleft
-	sqPoints[0] = x_origin
-	sqPoints[1] = y_origin
-	sqPoints[2] = 0
-
-	// topright
-	sqPoints[3] = x_origin + sqW
-	sqPoints[4] = y_origin
-	sqPoints[5] = 0
-
-	// bottomleft
-	sqPoints[6] = x_origin
-	sqPoints[7] = y_origin - sqH
-	sqPoints[8] = 0
-
-	// topright
-	sqPoints[9]  = x_origin + sqW
-	sqPoints[10] = y_origin
-	sqPoints[11] = 0
-
-	// bottomleft
-	sqPoints[12] = x_origin
-	sqPoints[13] = y_origin - sqH
-	sqPoints[14] = 0
-
-	// bottomright
-	sqPoints[15] = x_origin + sqW
-	sqPoints[16] = y_origin - sqH
-	sqPoints[17] = 0
+	var sqPoints []float32
 	
+	// define corners
+	topleft     := make([]float32,3); copy(topleft,     origin)
+	topright    := make([]float32,3); copy(topright,    origin)
+	bottomleft  := make([]float32,3); copy(bottomleft,  origin)
+	bottomright := make([]float32,3); copy(bottomright, origin)
+	
+	topright[0]    += sqW
+	bottomleft[1]  -= sqH
+	bottomright[0] += sqW
+	bottomright[1] -= sqH
+
+	// triangle 1
+	sqPoints = append(sqPoints, topleft...)
+	sqPoints = append(sqPoints, topright...)
+	sqPoints = append(sqPoints, bottomleft...)
+
+	// triangle 2
+	sqPoints = append(sqPoints, topright...)
+	sqPoints = append(sqPoints, bottomleft...)
+	sqPoints = append(sqPoints, bottomright...)
+
 	return sqPoints
 }
 
@@ -107,9 +125,11 @@ func ClearScreen(program uint32) {
 }
 
 func DrawShape(shape *types.Shape) {
-	// write to buffer
-	gl.BindVertexArray(shape.Drawable)
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(shape.Points)/3))
+	if shape.OnScreen {
+		// write to buffer
+		gl.BindVertexArray(shape.Drawable)
+		gl.DrawArrays(gl.TRIANGLES, 0, int32(len(shape.Points)/3))
+	}
 }
 
 func DrawFrame(window *glfw.Window) {
@@ -118,20 +138,25 @@ func DrawFrame(window *glfw.Window) {
 }
 
 // makeVao initializes and returns a vertex array from the points provided.
-func MakeVao(points []float32) uint32 {
-	var vbo uint32
-	gl.GenBuffers(1, &vbo)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+func MakeVao(points []float32, vao *uint32, color int) uint32 {
+
+	if color == 1 {
+		gl.BindBuffer(gl.ARRAY_BUFFER, Vbo1)
+	} else {
+		gl.BindBuffer(gl.ARRAY_BUFFER, Vbo2)
+	}
+		
 	gl.BufferData(gl.ARRAY_BUFFER, 4*len(points), gl.Ptr(points), gl.STATIC_DRAW)
 
-	var vao uint32
-	gl.GenVertexArrays(1, &vao)
-	gl.BindVertexArray(vao)
+	if *vao == uint32(0){
+		gl.GenVertexArrays(1, vao)
+	}
+
+	//gl.BindVertexArray(*vao)
 	gl.EnableVertexAttribArray(0)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
 
-	return vao
+	return *vao
 }
 
 // initGlfw initializes glfw and returns a Window to use.
@@ -163,14 +188,14 @@ func InitOpenGL() uint32 {
 		panic(err)
 	}
 
-	fragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
+	FragmentShader, err := compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER)
 	if err != nil {
 		panic(err)
 	}
-
+	
 	prog := gl.CreateProgram()
 	gl.AttachShader(prog, vertexShader)
-	gl.AttachShader(prog, fragmentShader)
+	gl.AttachShader(prog, FragmentShader)
 	gl.LinkProgram(prog)
 	return prog
 }
